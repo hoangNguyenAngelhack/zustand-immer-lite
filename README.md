@@ -2,12 +2,12 @@
 
 Zustand-like state management for React with built-in Immer and async support.
 
-- **~2KB** gzipped, zero config
+- **~3KB** gzipped, zero config
 - **No Provider** — just `create()` and use
 - **Immer built-in** — mutate state directly in actions
 - **Async effects** — call APIs with `set`/`get` helpers
-- **Computed state** — derived values that auto-recalculate
-- **Queries** — TanStack Query-like data fetching built in
+- **Computed state** — derived values with Proxy-based dependency tracking
+- **Queries** — TanStack Query-like data fetching with caching & race condition handling
 - **TypeScript-first** — full type inference
 
 ## Install
@@ -141,7 +141,7 @@ const useTodos = create({
 
 ### Computed
 
-Derived values that auto-recalculate when state changes. Accessed through selectors or `getState()`.
+Derived values that auto-recalculate when dependent state changes. Uses **Proxy-based dependency tracking** — only recomputes when the specific state keys a computed function reads have changed.
 
 ```ts
 const useTodos = create({
@@ -176,6 +176,23 @@ const visible = useTodos((s) => s.filtered);        // Todo[]
 const { activeCount, filtered } = useTodos.getState();
 ```
 
+Computed features:
+- **Dependency tracking** — uses `Proxy` to detect which state keys each computed reads. Only recomputes when those keys change, not on every state mutation
+- **Computed chaining** — computed values can reference other computed values (order matters: declared first = available to later ones)
+- **Key collision warning** — warns in console if a computed key has the same name as a state key
+
+```ts
+const useStore = create({
+  state: { price: 100, taxRate: 0.1 },
+  computed: {
+    tax: (state) => state.price * state.taxRate,
+    total: (state) => state.price + state.tax, // references computed "tax"
+  },
+});
+
+useStore.getState().total; // 110
+```
+
 ### Queries
 
 TanStack Query-like data fetching with auto loading/error/data management.
@@ -194,6 +211,7 @@ const useStore = create({
       },
       staleTime: 30_000,        // cache for 30s (optional, default 0)
       refetchInterval: 60_000,  // auto-refetch every 60s (optional)
+      maxCacheSize: 100,        // max cache entries (optional, default 50)
     },
     userById: {
       fn: async (id: number) => {
@@ -237,7 +255,10 @@ Query features:
 - **Per-args caching** — each unique argument set gets its own cache
 - **`staleTime`** — skip refetch if data is still fresh
 - **`refetchInterval`** — auto-refetch on interval
-- **`refetch()`** — manually trigger refetch
+- **`refetch()`** — manually trigger refetch (always bypasses staleTime)
+- **Race condition handling** — if multiple requests are in-flight, only the latest one is applied
+- **Request deduplication** — concurrent mounts with the same args only trigger one fetch
+- **LRU cache eviction** — old entries with no active listeners are evicted when `maxCacheSize` is exceeded (default 50)
 
 ### Using Outside React
 
@@ -345,12 +366,13 @@ const useTodos = create({
 
 | Feature | zustand-immer-lite | Redux Toolkit | Zustand | TanStack Query |
 |---|---|---|---|---|
-| Bundle size | ~2KB | ~40KB | ~2KB | ~40KB |
+| Bundle size | ~3KB | ~40KB | ~2KB | ~40KB |
 | Provider required | No | Yes | No | Yes |
 | Immer built-in | Yes | Yes | No | - |
 | Async support | Built-in effects | createAsyncThunk | Manual | Built-in |
-| Computed state | Built-in | Manual selectors | Manual | - |
-| Query caching | Built-in | - | - | Built-in |
+| Computed state | Built-in (dep tracking) | Manual selectors | Manual | - |
+| Query caching | Built-in (LRU) | - | - | Built-in |
+| Race condition handling | Yes | - | - | Yes |
 | Boilerplate | Minimal | Medium | Minimal | Minimal |
 
 ## License

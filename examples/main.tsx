@@ -7,7 +7,7 @@ import QueryDemo from './query-demo/App';
 function Root() {
   return (
     <div className="app-container">
-      <h1>redux-simple examples</h1>
+      <h1>zustand-immer-lite examples</h1>
       <div className="card">
         <CounterApp />
       </div>
