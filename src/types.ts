@@ -38,6 +38,7 @@ export interface QueryConfig<T = any> {
   fn: (...args: any[]) => Promise<T>;
   staleTime?: number;
   refetchInterval?: number;
+  maxCacheSize?: number;
 }
 
 export interface QueryResult<T> {

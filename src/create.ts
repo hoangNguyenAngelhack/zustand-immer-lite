@@ -8,7 +8,7 @@ export function create<C extends {
   actions?: Record<string, (...args: any[]) => any>;
   effects?: Record<string, (...args: any[]) => any>;
   computed?: Record<string, (state: any) => any>;
-  queries?: Record<string, { fn: (...args: any[]) => Promise<any>; staleTime?: number; refetchInterval?: number }>;
+  queries?: Record<string, { fn: (...args: any[]) => Promise<any>; staleTime?: number; refetchInterval?: number; maxCacheSize?: number }>;
 }>(
   config: C & {
     state: C['state'];
@@ -25,15 +25,106 @@ export function create<C extends {
   let exposedState: any = rawState;
   const listeners = new Set<() => void>();
 
-  // ─── Computed ─────────────────────────────────────────────────────
+  // ─── Computed (with Proxy-based dependency tracking) ────────────────
+  const computedKeys = config.computed ? Object.keys(config.computed) : [];
+  // deps[key] = Set of state keys that computed[key] accessed
+  const deps = new Map<string, Set<string>>();
+  // cached result per computed key
+  const cachedResults = new Map<string, any>();
+  // previous rawState ref for diffing changed keys
+  let prevRawState: S | undefined = undefined;
+
+  // Warn if computed key collides with state key (dev only)
+  if (config.computed) {
+    const stateKeys = Object.keys(config.state);
+    for (const ck of computedKeys) {
+      if (stateKeys.includes(ck)) {
+        console.warn(
+          `[zustand-immer-lite] computed key "${ck}" overwrites state key with the same name. ` +
+          `Rename the computed key to avoid unexpected behavior.`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Track dependencies of a computed fn by using a Proxy that records
+   * which keys are read from the state object.
+   */
+  const trackDeps = (fn: Function, stateObj: Record<string, any>): { result: any; accessed: Set<string> } => {
+    const accessed = new Set<string>();
+    const proxy = new Proxy(stateObj, {
+      get(target, prop, receiver) {
+        if (typeof prop === 'string') accessed.add(prop);
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+    const result = fn(proxy);
+    return { result, accessed };
+  };
+
   const recompute = () => {
     if (!config.computed) {
       exposedState = rawState;
       return;
     }
+
+    // Determine which raw state keys actually changed
+    const changedKeys = new Set<string>();
+    if (prevRawState === undefined) {
+      // First run — everything is "changed"
+      for (const k of Object.keys(rawState as any)) changedKeys.add(k);
+    } else {
+      for (const k of Object.keys(rawState as any)) {
+        if (!Object.is((rawState as any)[k], (prevRawState as any)[k])) {
+          changedKeys.add(k);
+        }
+      }
+    }
+
+    // Build state proxy that includes already-computed values for chaining
+    const stateObj: Record<string, any> = { ...rawState };
+
+    for (const key of computedKeys) {
+      const prevDeps = deps.get(key);
+      const hasCached = cachedResults.has(key);
+
+      // Skip recompute if: has cached result AND deps are tracked AND none of
+      // the deps are in changedKeys (also check computed deps via cascade)
+      if (hasCached && prevDeps && prevDeps.size > 0) {
+        let needsRecompute = false;
+        for (const dep of prevDeps) {
+          if (changedKeys.has(dep)) {
+            needsRecompute = true;
+            break;
+          }
+        }
+        if (!needsRecompute) {
+          // Reuse cached result
+          stateObj[key] = cachedResults.get(key);
+          continue;
+        }
+      }
+
+      // Recompute with dependency tracking
+      const { result, accessed } = trackDeps(config.computed[key] as Function, stateObj);
+      deps.set(key, accessed);
+
+      if (!Object.is(result, cachedResults.get(key))) {
+        // Mark this computed key as "changed" so downstream computed that
+        // depend on it will also recompute
+        changedKeys.add(key);
+      }
+
+      cachedResults.set(key, result);
+      stateObj[key] = result;
+    }
+
+    prevRawState = rawState;
+
     const next: Record<string, any> = {};
-    for (const key of Object.keys(config.computed)) {
-      next[key] = (config.computed[key] as Function)(rawState);
+    for (const key of computedKeys) {
+      next[key] = cachedResults.get(key);
     }
     computedValues = next;
     exposedState = { ...rawState, ...computedValues };

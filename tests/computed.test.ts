@@ -93,6 +93,68 @@ describe('computed', () => {
     expect(useStore.getState().value).toBe(42);
   });
 
+  it('should allow computed to reference other computed values', () => {
+    const useStore = create({
+      state: { price: 100, taxRate: 0.1 },
+      computed: {
+        tax: (state) => state.price * state.taxRate,
+        total: (state) => state.price + state.tax, // depends on computed "tax"
+      },
+    });
+
+    expect(useStore.getState().tax).toBe(10);
+    expect(useStore.getState().total).toBe(110);
+
+    useStore.setState({ price: 200 });
+    expect(useStore.getState().tax).toBe(20);
+    expect(useStore.getState().total).toBe(220);
+  });
+
+  it('should skip recompute when deps did not change', () => {
+    let expensiveCallCount = 0;
+    const useStore = create({
+      state: { x: 1, y: 10 },
+      computed: {
+        // Only depends on x
+        doubled: (state) => {
+          expensiveCallCount++;
+          return state.x * 2;
+        },
+      },
+    });
+
+    expect(useStore.getState().doubled).toBe(2);
+    expect(expensiveCallCount).toBe(1); // initial compute
+
+    // Change y — doubled should NOT recompute (doesn't depend on y)
+    useStore.setState({ y: 20 });
+    expect(useStore.getState().doubled).toBe(2);
+    expect(expensiveCallCount).toBe(1); // still 1, skipped
+
+    // Change x — doubled SHOULD recompute
+    useStore.setState({ x: 5 });
+    expect(useStore.getState().doubled).toBe(10);
+    expect(expensiveCallCount).toBe(2); // now 2
+  });
+
+  it('should warn when computed key collides with state key', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    create({
+      state: { count: 0 },
+      computed: {
+        count: (state) => state.count * 2, // same name as state key!
+      },
+    });
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('computed key "count" overwrites state key'),
+    );
+
+    warnSpy.mockRestore();
+  });
+
   it('should work with no computed (backward compat)', () => {
     const useStore = create({
       state: { count: 0 },
