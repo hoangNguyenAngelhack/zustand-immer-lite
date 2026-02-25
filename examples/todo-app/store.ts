@@ -66,4 +66,29 @@ export const useTodos = create({
       }
     },
   },
+  mutations: {
+    saveTodo: {
+      fn: async (text: string) => {
+        // Simulate API call
+        await new Promise((r) => setTimeout(r, 300));
+        return { id: nextId++, text, completed: false } as Todo;
+      },
+      onSuccess: (todo: Todo) => {
+        // Add the saved todo to local state
+        useTodos.setState((s) => { s.items.push(todo); });
+      },
+    },
+  },
+  persist: {
+    name: 'todo-store',
+    partialize: (state) => ({ items: state.items, filter: state.filter }),
+  },
 });
+
+// Log filter changes via subscribeWithSelector
+useTodos.subscribe(
+  (state) => state.filter,
+  (current, previous) => {
+    console.log(`filter changed: ${previous} -> ${current}`);
+  },
+);

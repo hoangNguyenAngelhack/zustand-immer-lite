@@ -1,14 +1,19 @@
 import { produce, type Draft } from 'immer';
 import { useSyncExternalStore, useRef, useCallback } from 'react';
-import type { SetState, EffectHelpers, UseStore } from './types';
+import type { SetState, EffectHelpers, UseStore, PersistConfig } from './types';
 import { createQueryHook } from './query';
+import { createMutationHook } from './mutation';
+import { createInfiniteQueryHook } from './infinite-query';
+import { hydrateState, persistState } from './middleware/persist';
 
 export function create<C extends {
   state: Record<string, any>;
   actions?: Record<string, (...args: any[]) => any>;
   effects?: Record<string, (...args: any[]) => any>;
   computed?: Record<string, (state: any) => any>;
-  queries?: Record<string, { fn: (...args: any[]) => Promise<any>; staleTime?: number; refetchInterval?: number; maxCacheSize?: number }>;
+  queries?: Record<string, { fn: (...args: any[]) => Promise<any>; staleTime?: number; refetchInterval?: number; maxCacheSize?: number; infinite?: boolean; getNextPageParam?: any; getPreviousPageParam?: any }>;
+  mutations?: Record<string, { fn: (...args: any[]) => Promise<any>; onSuccess?: any; onError?: any; onSettled?: any }>;
+  persist?: PersistConfig<any>;
 }>(
   config: C & {
     state: C['state'];
@@ -16,8 +21,10 @@ export function create<C extends {
     effects?: { [K in keyof C['effects']]: (helpers: EffectHelpers<C['state']>, ...args: any[]) => Promise<any> };
     computed?: { [K in keyof C['computed']]: (state: C['state']) => any };
     queries?: C['queries'];
+    mutations?: C['mutations'];
+    persist?: PersistConfig<C['state']>;
   },
-): UseStore<C['state'], NonNullable<C['actions']>, NonNullable<C['effects']>, NonNullable<C['computed']>, NonNullable<C['queries']>> {
+): UseStore<C['state'], NonNullable<C['actions']>, NonNullable<C['effects']>, NonNullable<C['computed']>, NonNullable<C['queries']>, NonNullable<C['mutations']>> {
   type S = C['state'];
 
   let rawState: S = config.state;
@@ -133,7 +140,19 @@ export function create<C extends {
   // Initial compute
   recompute();
 
-  const notify = () => listeners.forEach((fn) => fn());
+  // Hydrate from storage if persist is configured
+  if (config.persist) {
+    rawState = hydrateState(rawState, config.persist);
+    recompute();
+    config.persist.onRehydrationFinished?.(exposedState);
+  }
+
+  const notify = () => {
+    listeners.forEach((fn) => fn());
+    if (config.persist) {
+      persistState(rawState, config.persist);
+    }
+  };
 
   const commitState = (nextRaw: S) => {
     rawState = nextRaw;
@@ -143,10 +162,46 @@ export function create<C extends {
 
   const getState = (): any => exposedState;
 
-  const subscribe = (listener: () => void): (() => void) => {
-    listeners.add(listener);
-    return () => { listeners.delete(listener); };
-  };
+  function subscribe(listener: () => void): () => void;
+  function subscribe<T>(
+    selector: (state: any) => T,
+    callback: (current: T, previous: T) => void,
+    options?: { equalityFn?: (a: T, b: T) => boolean; fireImmediately?: boolean },
+  ): () => void;
+  function subscribe(
+    selectorOrListener: ((state: any) => any) | (() => void),
+    callback?: (current: any, previous: any) => void,
+    options?: { equalityFn?: (a: any, b: any) => boolean; fireImmediately?: boolean },
+  ): () => void {
+    // Original path: simple listener
+    if (callback === undefined) {
+      const listener = selectorOrListener as () => void;
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    }
+
+    // Selector path
+    const selector = selectorOrListener as (state: any) => any;
+    const equalityFn = options?.equalityFn ?? Object.is;
+    let previousValue = selector(getState());
+
+    const internalListener = () => {
+      const currentValue = selector(getState());
+      if (!equalityFn(currentValue, previousValue)) {
+        const prev = previousValue;
+        previousValue = currentValue;
+        callback(currentValue, prev);
+      }
+    };
+
+    listeners.add(internalListener);
+
+    if (options?.fireImmediately) {
+      callback(previousValue, previousValue);
+    }
+
+    return () => { listeners.delete(internalListener); };
+  }
 
   const setState: SetState<S> = (updater) => {
     if (typeof updater === 'function') {
@@ -185,12 +240,23 @@ export function create<C extends {
     }
   }
 
-  // Bind queries
+  // Bind queries (detect infinite queries via `infinite: true` flag)
   const queries: any = {};
   if (config.queries) {
     for (const key of Object.keys(config.queries)) {
       const qConfig = (config.queries as any)[key];
-      queries[key] = createQueryHook(qConfig);
+      queries[key] = qConfig.infinite
+        ? createInfiniteQueryHook(qConfig)
+        : createQueryHook(qConfig);
+    }
+  }
+
+  // Bind mutations
+  const mutations: any = {};
+  if (config.mutations) {
+    for (const key of Object.keys(config.mutations)) {
+      const mConfig = (config.mutations as any)[key];
+      mutations[key] = createMutationHook(mConfig);
     }
   }
 
@@ -222,11 +288,12 @@ export function create<C extends {
     }, []);
 
     return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  }) as UseStore<C['state'], NonNullable<C['actions']>, NonNullable<C['effects']>, NonNullable<C['computed']>, NonNullable<C['queries']>>;
+  }) as UseStore<C['state'], NonNullable<C['actions']>, NonNullable<C['effects']>, NonNullable<C['computed']>, NonNullable<C['queries']>, NonNullable<C['mutations']>>;
 
   useStore.actions = actions;
   useStore.effects = effects;
   useStore.queries = queries;
+  useStore.mutations = mutations;
   useStore.getState = getState;
   useStore.setState = setState;
   useStore.subscribe = subscribe;

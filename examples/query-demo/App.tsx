@@ -1,5 +1,5 @@
-import React from 'react';
-import { useApp } from './store';
+import React, { useState } from 'react';
+import { useApp, type FeedPage } from './store';
 
 function UserList() {
   const { data: users, loading, error, refetch } = useApp.queries.allUsers();
@@ -27,6 +27,67 @@ function UserList() {
         ))}
       </ul>
       <button onClick={refetch}>Refetch Users</button>
+    </div>
+  );
+}
+
+function OptimisticRename() {
+  const [name, setName] = useState('');
+  const selectedId = useApp((s) => s.selectedUserId);
+
+  const handleRename = async () => {
+    if (!selectedId || !name.trim()) return;
+
+    // Optimistic update — UI updates instantly, rolls back on failure
+    await (useApp.queries.allUsers as any).optimisticUpdate({
+      args: [],
+      updater: (prev: any[]) =>
+        prev?.map((u: any) => u.id === selectedId ? { ...u, name: name.trim() } : u),
+      mutationFn: async () => {
+        await new Promise((r) => setTimeout(r, 500));
+        return { id: selectedId, name: name.trim() };
+      },
+    });
+    setName('');
+  };
+
+  if (!selectedId) return null;
+
+  return (
+    <div style={{ margin: '8px 0' }}>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="New name (optimistic)"
+      />
+      <button onClick={handleRename}>Rename</button>
+    </div>
+  );
+}
+
+function RenameWithMutation() {
+  const [name, setName] = useState('');
+  const selectedId = useApp((s) => s.selectedUserId);
+  const { mutate, loading } = useApp.mutations.renameUser();
+
+  const handleRename = () => {
+    if (!selectedId || !name.trim()) return;
+    mutate(selectedId, name.trim());
+    setName('');
+  };
+
+  if (!selectedId) return null;
+
+  return (
+    <div style={{ margin: '8px 0' }}>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="New name (mutation)"
+      />
+      <button onClick={handleRename} disabled={loading}>
+        {loading ? 'Saving...' : 'Rename (mutation)'}
+      </button>
     </div>
   );
 }
@@ -68,12 +129,52 @@ function UserDetailInner({ id }: { id: number }) {
   );
 }
 
+function InfiniteFeed() {
+  const result = (useApp.queries.feed as any)();
+  const {
+    data,
+    loading,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = result;
+
+  const allItems = data?.pages.flatMap((p: FeedPage) => p.items) ?? [];
+
+  return (
+    <div style={{ marginTop: 24 }}>
+      <h3>Infinite Feed</h3>
+      {loading && <p>Loading first page...</p>}
+      {error && <p style={{ color: 'red' }}>Error: {error.message}</p>}
+      <ul>
+        {allItems.map((item: any) => (
+          <li key={item.id} style={{ padding: '4px 0' }}>
+            {item.title}
+          </li>
+        ))}
+      </ul>
+      {hasNextPage && (
+        <button onClick={fetchNextPage} disabled={isFetchingNextPage}>
+          {isFetchingNextPage ? 'Loading more...' : 'Load More'}
+        </button>
+      )}
+      {!hasNextPage && allItems.length > 0 && (
+        <p style={{ color: '#888' }}>No more items.</p>
+      )}
+    </div>
+  );
+}
+
 export default function QueryDemo() {
   return (
     <div>
       <h2>Query Demo</h2>
       <UserList />
+      <OptimisticRename />
+      <RenameWithMutation />
       <UserDetail />
+      <InfiniteFeed />
     </div>
   );
 }

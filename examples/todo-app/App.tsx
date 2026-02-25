@@ -5,13 +5,13 @@ type Filter = 'all' | 'active' | 'completed';
 
 function TodoInput() {
   const [text, setText] = useState('');
-  const { add } = useTodos.actions;
+  const { mutate, loading } = useTodos.mutations.saveTodo();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = text.trim();
     if (trimmed) {
-      add(trimmed);
+      mutate(trimmed); // mutation: saves to API, then adds to state via onSuccess
       setText('');
     }
   };
@@ -23,8 +23,11 @@ function TodoInput() {
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder="What needs to be done?"
+        disabled={loading}
       />
-      <button type="submit">Add</button>
+      <button type="submit" disabled={loading}>
+        {loading ? 'Saving...' : 'Add'}
+      </button>
     </form>
   );
 }
@@ -42,7 +45,6 @@ function TodoItem({ id, text, completed }: { id: number; text: string; completed
 }
 
 function TodoList() {
-  // Using computed values - auto-recalculated!
   const filtered = useTodos((s) => s.filtered);
   const loading = useTodos((s) => s.loading);
   const error = useTodos((s) => s.error);
@@ -77,7 +79,6 @@ function FilterButtons() {
 }
 
 function Footer() {
-  // Using computed values - no manual calculation!
   const activeCount = useTodos((s) => s.activeCount);
   const completedCount = useTodos((s) => s.completedCount);
   const { clearCompleted } = useTodos.actions;
@@ -101,7 +102,7 @@ function TodoApp() {
 
   return (
     <div>
-      <h2>Todo App (with computed)</h2>
+      <h2>Todo App (with mutations, persist, computed)</h2>
       <TodoInput />
       <FilterButtons />
       <TodoList />

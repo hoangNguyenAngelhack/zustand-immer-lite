@@ -17,4 +17,15 @@ export const useCounter = create({
       return state.isPositive ? 'positive' : 'negative'; // chaining computed
     },
   },
+  persist: {
+    name: 'counter-store', // auto-saved to localStorage
+  },
 });
+
+// Subscribe with selector — only fires when count changes
+useCounter.subscribe(
+  (state) => state.count,
+  (current, previous) => {
+    console.log(`count changed: ${previous} -> ${current}`);
+  },
+);

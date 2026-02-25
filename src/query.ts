@@ -1,5 +1,5 @@
 import { useSyncExternalStore, useEffect, useRef, useCallback, useMemo } from 'react';
-import type { QueryConfig, QueryResult } from './types';
+import type { QueryConfig, QueryResult, QueryHook } from './types';
 
 interface CacheEntry<T> {
   data: T | undefined;
@@ -133,7 +133,7 @@ export function createQueryHook<T>(config: QueryConfig<T>) {
   };
 
   // The returned hook
-  return (...args: any[]): QueryResult<T> => {
+  const hook = ((...args: any[]): QueryResult<T> => {
     const key = JSON.stringify(args);
     const argsRef = useRef(args);
     argsRef.current = args;
@@ -175,5 +175,79 @@ export function createQueryHook<T>(config: QueryConfig<T>) {
       () => ({ data: entry.data, loading: entry.loading, error: entry.error, refetch }),
       [entry, refetch],
     );
+  }) as QueryHook<T>;
+
+  // ─── Imperative methods (work outside React) ─────────────────────
+
+  hook.prefetch = (...args: any[]) => {
+    const key = JSON.stringify(args);
+    fetchData(key, args, false);
   };
+
+  hook.invalidate = (...args: any[]) => {
+    const key = JSON.stringify(args);
+    const entry = cache.get(key);
+    if (entry) {
+      setEntry(key, { ...entry, fetchedAt: 0 });
+    }
+  };
+
+  hook.invalidateAll = () => {
+    for (const [key, entry] of cache) {
+      setEntry(key, { ...entry, fetchedAt: 0 });
+    }
+  };
+
+  hook.setQueryData = (args: any[], updater: T | ((prev: T | undefined) => T)) => {
+    const key = JSON.stringify(args);
+    const entry = getEntry(key);
+    const newData = typeof updater === 'function'
+      ? (updater as (prev: T | undefined) => T)(entry.data)
+      : updater;
+    setEntry(key, { ...entry, data: newData, fetchedAt: Date.now() });
+  };
+
+  hook.getQueryData = (args: any[]): T | undefined => {
+    const key = JSON.stringify(args);
+    return cache.get(key)?.data;
+  };
+
+  hook.optimisticUpdate = async <R>({
+    args,
+    updater,
+    mutationFn,
+    onError,
+    onSuccess,
+    onSettled,
+  }: {
+    args: any[];
+    updater: (prev: T | undefined) => T;
+    mutationFn: () => Promise<R>;
+    onError?: (error: Error, previousData: T | undefined) => void;
+    onSuccess?: (result: R) => void;
+    onSettled?: () => void;
+  }): Promise<R> => {
+    const key = JSON.stringify(args);
+    const previousData = cache.get(key)?.data;
+
+    // Apply optimistic update
+    const entry = getEntry(key);
+    setEntry(key, { ...entry, data: updater(previousData), fetchedAt: Date.now() });
+
+    try {
+      const result = await mutationFn();
+      onSuccess?.(result);
+      return result;
+    } catch (e) {
+      // Rollback
+      const currentEntry = getEntry(key);
+      setEntry(key, { ...currentEntry, data: previousData });
+      onError?.(e instanceof Error ? e : new Error(String(e)), previousData);
+      throw e;
+    } finally {
+      onSettled?.();
+    }
+  };
+
+  return hook;
 }
