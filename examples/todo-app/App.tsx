@@ -11,7 +11,7 @@ function TodoInput() {
     e.preventDefault();
     const trimmed = text.trim();
     if (trimmed) {
-      mutate(trimmed); // mutation: saves to API, then adds to state via onSuccess
+      mutate(trimmed);
       setText('');
     }
   };
@@ -93,7 +93,7 @@ function Footer() {
   );
 }
 
-function TodoApp() {
+export default function TodoApp() {
   const { fetchTodos } = useTodos.effects;
 
   useEffect(() => {
@@ -102,7 +102,10 @@ function TodoApp() {
 
   return (
     <div>
-      <h2>Todo App (with mutations, persist, computed)</h2>
+      <h2>Todo App</h2>
+      <p style={{ fontSize: '0.85rem', color: '#888' }}>
+        Demonstrates: actions, effects, computed, mutations, persist with partialize, subscribe with selector
+      </p>
       <TodoInput />
       <FilterButtons />
       <TodoList />
@@ -110,5 +113,3 @@ function TodoApp() {
     </div>
   );
 }
-
-export default TodoApp;

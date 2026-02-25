@@ -2,19 +2,24 @@
 
 Zustand-like state management for React with built-in Immer and async support.
 
-- **~3KB** gzipped, zero config
-- **No Provider** — just `create()` and use
-- **Immer built-in** — mutate state directly in actions
-- **Async effects** — call APIs with `set`/`get` helpers
-- **Computed state** — derived values with Proxy-based dependency tracking
-- **Queries** — TanStack Query-like data fetching with caching & race condition handling
-- **Infinite queries** — paginated/cursor-based fetching with `fetchNextPage`/`fetchPreviousPage`
-- **Mutations** — write operations with `onSuccess`/`onError`/`onSettled` callbacks
-- **Optimistic updates** — instant UI updates with automatic rollback on failure
-- **Prefetching** — populate cache before components mount
-- **Persist** — save/restore state to localStorage or custom storage
-- **Subscribe with selector** — listen to specific state slices with equality checks
-- **TypeScript-first** — full type inference
+[![npm](https://img.shields.io/npm/v/zustand-immer-lite)](https://www.npmjs.com/package/zustand-immer-lite)
+[![bundle size](https://img.shields.io/bundlephobia/minzip/zustand-immer-lite)](https://bundlephobia.com/package/zustand-immer-lite)
+[![license](https://img.shields.io/npm/l/zustand-immer-lite)](./LICENSE)
+
+## Features
+
+- **Zero config** — one `create()` call, no Provider, no boilerplate
+- **Immer built-in** — mutate state directly, immutability handled for you
+- **Computed state** — derived values with Proxy-based dependency tracking and caching
+- **Async effects** — side effects with `set`/`get` helpers
+- **Queries** — data fetching with per-args caching, stale time, refetch interval, LRU eviction, race condition handling, and request deduplication
+- **Infinite queries** — cursor-based pagination with `fetchNextPage`/`fetchPreviousPage`
+- **Mutations** — write operations with `onSuccess`/`onError`/`onSettled` lifecycle
+- **Optimistic updates** — instant UI feedback with automatic rollback on failure
+- **Prefetching & cache control** — `prefetch`, `invalidate`, `setQueryData`, `getQueryData`
+- **Persist** — save/restore state to localStorage (or custom storage) with versioning and migration
+- **Subscribe with selector** — listen to specific state slices with custom equality
+- **TypeScript-first** — full type inference from config
 
 ## Install
 
@@ -22,7 +27,9 @@ Zustand-like state management for React with built-in Immer and async support.
 npm install zustand-immer-lite
 ```
 
-Peer dependencies: `react >= 18`
+Requires `react >= 18` and `react-dom >= 18` as peer dependencies.
+
+---
 
 ## Quick Start
 
@@ -36,15 +43,19 @@ const useCounter = create({
     decrement(state) { state.count -= 1; },
     addBy(state, amount: number) { state.count += amount; },
   },
+  computed: {
+    doubled: (state) => state.count * 2,
+  },
 });
 
 function Counter() {
   const count = useCounter((s) => s.count);
+  const doubled = useCounter((s) => s.doubled);
   const { increment, addBy } = useCounter.actions;
 
   return (
     <div>
-      <span>{count}</span>
+      <p>{count} (doubled: {doubled})</p>
       <button onClick={increment}>+1</button>
       <button onClick={() => addBy(10)}>+10</button>
     </div>
@@ -54,69 +65,93 @@ function Counter() {
 
 No `<Provider>`, no `useDispatch`, no action types.
 
-## API
+---
+
+## API Reference
 
 ### `create(config)`
 
-Creates a store hook.
-
 ```ts
 const useStore = create({
-  state: { ... },       // initial state
-  actions: { ... },     // sync actions (optional)
-  effects: { ... },     // async effects (optional)
-  computed: { ... },    // derived state (optional)
-  queries: { ... },     // data fetching (optional)
-  mutations: { ... },   // write operations (optional)
-  persist: { ... },     // state persistence (optional)
+  state: { ... },       // initial state (required)
+  actions: { ... },     // sync state updaters (optional)
+  effects: { ... },     // async side effects (optional)
+  computed: { ... },    // derived values (optional)
+  queries: { ... },     // data fetching hooks (optional)
+  mutations: { ... },   // write operation hooks (optional)
+  persist: { ... },     // state persistence config (optional)
 });
 ```
 
-**Returns** a hook with attached properties:
+**Returns** a React hook with attached properties:
 
 | Property | Description |
 |---|---|
-| `useStore()` | Returns full state (including computed) |
-| `useStore(selector)` | Returns selected slice of state |
-| `useStore.actions` | Bound sync actions |
-| `useStore.effects` | Bound async effects |
-| `useStore.queries` | Bound query hooks |
-| `useStore.mutations` | Bound mutation hooks |
-| `useStore.getState()` | Read state outside React |
+| `useStore()` | Full state including computed values |
+| `useStore(selector)` | Selected slice of state |
+| `useStore.actions` | Bound sync actions (callable outside React) |
+| `useStore.effects` | Bound async effects (callable outside React) |
+| `useStore.queries` | Query hooks (use inside React components) |
+| `useStore.mutations` | Mutation hooks (use inside React components) |
+| `useStore.getState()` | Read current state outside React |
 | `useStore.setState(updater)` | Update state outside React |
-| `useStore.subscribe(listener)` | Subscribe to state changes |
-| `useStore.subscribe(selector, callback, options?)` | Subscribe to specific state slices |
+| `useStore.subscribe(listener)` | Listen to all state changes |
+| `useStore.subscribe(selector, cb, opts?)` | Listen to specific state slices |
+
+---
 
 ### Actions
 
-Sync functions that receive an Immer draft. Mutate directly — Immer handles immutability.
+Sync functions that receive an Immer draft as the first argument. Mutate directly — Immer produces the immutable update.
 
 ```ts
 const useStore = create({
-  state: { items: [] as string[] },
+  state: { items: [] as string[], count: 0 },
   actions: {
     add(state, item: string) {
-      state.items.push(item);  // mutate directly, Immer makes it immutable
+      state.items.push(item);
     },
-    clear(state) {
+    reset(state) {
       state.items = [];
+      state.count = 0;
     },
   },
 });
 
-// Call directly — no dispatch needed
+// Call anywhere — no dispatch needed
 useStore.actions.add('hello');
-useStore.actions.clear();
+useStore.actions.reset();
 ```
+
+For complex state types, annotate the first param with `Draft<YourState>`:
+
+```ts
+import type { Draft } from 'immer';
+
+interface AppState { items: Todo[]; loading: boolean; }
+
+const useStore = create({
+  state: { items: [] as Todo[], loading: false },
+  actions: {
+    add(state: Draft<AppState>, text: string) {
+      state.items.push({ id: Date.now(), text, done: false });
+    },
+  },
+});
+```
+
+---
 
 ### Effects
 
-Async functions for API calls. Receive `{ set, get }` helpers.
+Async functions for API calls and side effects. Receive `{ set, get }` helpers as the first argument.
 
-- `set(updater)` — update state (supports Immer draft, partial object, or full state)
-- `get()` — read current state
+- `set(updater)` — accepts an Immer draft function, a partial object, or a full state replacement
+- `get()` — returns current state (including computed)
 
 ```ts
+import { create, type EffectHelpers } from 'zustand-immer-lite';
+
 const useTodos = create({
   state: {
     items: [] as Todo[],
@@ -124,8 +159,8 @@ const useTodos = create({
     error: null as string | null,
   },
   effects: {
-    async fetchTodos({ set }) {
-      set((s) => { s.loading = true; });
+    async fetchTodos({ set }: EffectHelpers<TodoState>) {
+      set((s) => { s.loading = true; s.error = null; });
       try {
         const res = await fetch('/api/todos');
         const data = await res.json();
@@ -136,11 +171,16 @@ const useTodos = create({
     },
   },
 });
+
+// Call from a component or anywhere
+useTodos.effects.fetchTodos();
 ```
+
+---
 
 ### Computed
 
-Derived values that auto-recalculate when dependent state changes. Uses **Proxy-based dependency tracking** — only recomputes when the specific state keys a computed function reads have changed.
+Derived values that auto-recalculate when dependencies change. Uses **Proxy-based dependency tracking** — each computed function is only recomputed when the specific state keys it reads have actually changed.
 
 ```ts
 const useTodos = create({
@@ -150,37 +190,41 @@ const useTodos = create({
   },
   computed: {
     activeCount: (state) => state.items.filter(t => !t.done).length,
+    completedCount: (state) => state.items.filter(t => t.done).length,
     filtered: (state) => {
       if (state.filter === 'all') return state.items;
-      return state.items.filter(t =>
-        state.filter === 'active' ? !t.done : t.done
-      );
+      if (state.filter === 'active') return state.items.filter(t => !t.done);
+      return state.items.filter(t => t.done);
     },
   },
 });
 
-// Computed values work like regular state
+// Use like regular state
 const count = useTodos((s) => s.activeCount);
 const visible = useTodos((s) => s.filtered);
 ```
 
-Computed chaining — computed values can reference other computed values:
+**Computed chaining** — computed values can reference other computed values:
 
 ```ts
 const useStore = create({
   state: { price: 100, taxRate: 0.1 },
   computed: {
     tax: (state) => state.price * state.taxRate,
-    total: (state) => state.price + state.tax, // references computed "tax"
+    total: (state) => state.price + state.tax, // uses computed "tax"
   },
 });
 
 useStore.getState().total; // 110
 ```
 
+> **Note:** If a computed key has the same name as a state key, a warning is logged. The computed value will take priority in the exposed state.
+
+---
+
 ### Queries
 
-TanStack Query-like data fetching with auto loading/error/data management.
+Data fetching with automatic caching, loading/error states, and deduplication.
 
 ```ts
 const useStore = create({
@@ -191,9 +235,7 @@ const useStore = create({
         const res = await fetch('/api/users');
         return res.json() as Promise<User[]>;
       },
-      staleTime: 30_000,        // cache for 30s (default 0)
-      refetchInterval: 60_000,  // auto-refetch every 60s
-      maxCacheSize: 100,        // max cache entries (default 50)
+      staleTime: 30_000,
     },
     userById: {
       fn: async (id: number) => {
@@ -201,12 +243,13 @@ const useStore = create({
         return res.json() as Promise<User>;
       },
       staleTime: 10_000,
+      maxCacheSize: 100,
     },
   },
 });
 ```
 
-Use queries as hooks in components:
+Use in components — each query is a React hook:
 
 ```tsx
 function UserList() {
@@ -222,35 +265,54 @@ function UserList() {
     </ul>
   );
 }
+
+// Per-args query — each id gets its own cache entry
+function UserDetail({ id }: { id: number }) {
+  const { data, loading } = useStore.queries.userById(id);
+  // ...
+}
 ```
 
-Query features:
-- **Auto-fetch** on mount
-- **Per-args caching** — each unique argument set gets its own cache
-- **`staleTime`** — skip refetch if data is still fresh
-- **`refetchInterval`** — auto-refetch on interval
-- **`refetch()`** — manually trigger refetch (always bypasses staleTime)
-- **Race condition handling** — if multiple requests are in-flight, only the latest one is applied
-- **Request deduplication** — concurrent mounts with the same args only trigger one fetch
-- **LRU cache eviction** — old entries with no active listeners are evicted when `maxCacheSize` is exceeded
+**Query config options:**
 
-#### Prefetching
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `fn` | `(...args) => Promise<T>` | — | Fetch function (required) |
+| `staleTime` | `number` | `0` | Milliseconds before data is considered stale |
+| `refetchInterval` | `number` | — | Auto-refetch interval in milliseconds |
+| `maxCacheSize` | `number` | `50` | Max cache entries before LRU eviction |
 
-Populate cache before components mount:
+**Query result:**
+
+| Field | Type | Description |
+|---|---|---|
+| `data` | `T \| undefined` | Fetched data |
+| `loading` | `boolean` | `true` while fetching |
+| `error` | `Error \| null` | Error from last fetch |
+| `refetch` | `() => void` | Force refetch (ignores staleTime) |
+
+**Built-in behaviors:**
+- Auto-fetches on mount and when args change
+- Per-args caching — each unique argument set gets its own cache entry
+- Request deduplication — concurrent mounts with same args trigger only one fetch
+- Race condition safety — only the latest request is applied
+- LRU eviction — entries with no active listeners are evicted when cache exceeds `maxCacheSize`
+
+---
+
+### Prefetching & Cache Control
+
+Imperative methods attached to each query hook. Work outside React.
 
 ```ts
-// Prefetch outside React (e.g., on route change, hover)
+// Prefetch — populate cache before components mount
 useStore.queries.users.prefetch();
 useStore.queries.userById.prefetch(5);
 
-// When the component mounts, data is already available — no loading state
-```
+// Invalidate — mark stale, next mount will refetch
+useStore.queries.users.invalidate();       // specific args
+useStore.queries.users.invalidateAll();    // all cached entries
 
-#### Cache Manipulation
-
-Read and write query cache directly:
-
-```ts
 // Read cache
 const users = useStore.queries.users.getQueryData([]);
 
@@ -258,30 +320,35 @@ const users = useStore.queries.users.getQueryData([]);
 useStore.queries.users.setQueryData([], (prev) =>
   prev?.map(u => u.id === 1 ? { ...u, name: 'Updated' } : u)
 );
-
-// Invalidate — marks cache stale, triggers refetch on next mount
-useStore.queries.users.invalidate();         // specific args
-useStore.queries.users.invalidateAll();      // all cached entries
 ```
 
-#### Optimistic Updates
+---
 
-Instant UI updates with automatic rollback on failure:
+### Optimistic Updates
+
+Apply instant UI updates and automatically rollback if the mutation fails.
 
 ```ts
 await useStore.queries.users.optimisticUpdate({
-  args: [],
-  updater: (prev) => [...(prev ?? []), newUser],
-  mutationFn: () => fetch('/api/users', { method: 'POST', body: JSON.stringify(newUser) }),
-  onSuccess: (result) => { console.log('Created:', result); },
-  onError: (error, previousData) => { console.error('Rolled back:', error); },
-  onSettled: () => { console.log('Done'); },
+  args: [],                                          // query args to update
+  updater: (prev) => [...(prev ?? []), newUser],     // apply optimistic data
+  mutationFn: () => fetch('/api/users', {            // actual API call
+    method: 'POST',
+    body: JSON.stringify(newUser),
+  }),
+  onSuccess: (result) => { /* mutation succeeded */ },
+  onError: (error, previousData) => { /* rolled back to previousData */ },
+  onSettled: () => { /* always runs */ },
 });
 ```
 
+If `mutationFn` throws, the cache is automatically rolled back to the previous data.
+
+---
+
 ### Mutations
 
-Write operations with lifecycle callbacks. Per-component instance state (not shared like queries).
+Write operations with per-component-instance state and lifecycle callbacks.
 
 ```ts
 const useStore = create({
@@ -299,8 +366,7 @@ const useStore = create({
         return res.json() as Promise<Todo>;
       },
       onSuccess: (data) => {
-        // Invalidate queries to refetch fresh data
-        useStore.queries.todos.invalidateAll();
+        useStore.queries.todos.invalidateAll(); // refetch after mutation
       },
       onError: (error) => { console.error(error); },
       onSettled: (data, error) => { /* always runs */ },
@@ -309,7 +375,7 @@ const useStore = create({
 });
 ```
 
-Use mutations in components:
+Use in components — each mutation returns independent per-instance state:
 
 ```tsx
 function AddTodo() {
@@ -328,16 +394,31 @@ function AddTodo() {
 }
 ```
 
-Mutation features:
-- **`mutate(...args)`** — fire and forget (errors stored in state)
-- **`mutateAsync(...args)`** — returns Promise for await
-- **`reset()`** — clear data/error/loading back to initial
-- **`onSuccess`/`onError`/`onSettled`** — lifecycle callbacks
-- **Per-instance state** — each component using the same mutation gets independent state
+**Mutation config:**
+
+| Option | Type | Description |
+|---|---|---|
+| `fn` | `(...args) => Promise<T>` | Mutation function (required) |
+| `onSuccess` | `(data: T) => void` | Called on success |
+| `onError` | `(error: Error) => void` | Called on failure |
+| `onSettled` | `(data \| undefined, error \| null) => void` | Called after success or failure |
+
+**Mutation result:**
+
+| Field | Type | Description |
+|---|---|---|
+| `mutate` | `(...args) => void` | Fire and forget (errors stored in state) |
+| `mutateAsync` | `(...args) => Promise<T>` | Returns a Promise |
+| `data` | `T \| undefined` | Last successful result |
+| `loading` | `boolean` | `true` while running |
+| `error` | `Error \| null` | Error from last run |
+| `reset` | `() => void` | Clear data/error/loading |
+
+---
 
 ### Infinite Queries
 
-Paginated/cursor-based data fetching. Accumulates pages automatically.
+Cursor-based pagination that accumulates pages automatically.
 
 ```ts
 const useStore = create({
@@ -351,19 +432,19 @@ const useStore = create({
         }>;
       },
       getNextPageParam: (lastPage) => lastPage.nextCursor,
-      infinite: true,
+      infinite: true as const,
       staleTime: 30_000,
     },
   },
 });
 ```
 
-Use infinite queries in components:
+Use in components:
 
 ```tsx
 function Feed() {
   const {
-    data,                    // { pages: Page[], pageParams: unknown[] }
+    data,                  // { pages: Page[], pageParams: unknown[] }
     loading,
     error,
     fetchNextPage,
@@ -376,7 +457,7 @@ function Feed() {
 
   return (
     <div>
-      {loading && <p>Loading...</p>}
+      {loading && !data && <p>Loading...</p>}
       {allItems.map(item => <div key={item.id}>{item.title}</div>)}
       {hasNextPage && (
         <button onClick={fetchNextPage} disabled={isFetchingNextPage}>
@@ -388,17 +469,36 @@ function Feed() {
 }
 ```
 
-Infinite query features:
-- **`fetchNextPage()`** — fetch and append next page
-- **`fetchPreviousPage()`** — fetch and prepend previous page
-- **`hasNextPage`/`hasPreviousPage`** — derived from `getNextPageParam`/`getPreviousPageParam`
-- **`isFetchingNextPage`/`isFetchingPreviousPage`** — loading state per direction
-- **`refetch()`** — re-fetches first page only
-- Supports `prefetch`, `invalidate`, `setQueryData`, `getQueryData`
+**Infinite query config** (extends regular query config):
+
+| Option | Type | Description |
+|---|---|---|
+| `infinite` | `true` | Marks this as an infinite query (required) |
+| `getNextPageParam` | `(lastPage, allPages) => unknown \| null` | Return next cursor, or null/undefined to stop (required) |
+| `getPreviousPageParam` | `(firstPage, allPages) => unknown \| null` | Return previous cursor for bidirectional pagination (optional) |
+
+**Infinite query result:**
+
+| Field | Type | Description |
+|---|---|---|
+| `data` | `InfiniteData<T> \| undefined` | `{ pages: T[], pageParams: unknown[] }` |
+| `loading` | `boolean` | `true` during initial fetch |
+| `error` | `Error \| null` | Error from last fetch |
+| `fetchNextPage` | `() => void` | Fetch and append next page |
+| `fetchPreviousPage` | `() => void` | Fetch and prepend previous page |
+| `hasNextPage` | `boolean` | `true` if `getNextPageParam` returns non-null |
+| `hasPreviousPage` | `boolean` | `true` if `getPreviousPageParam` returns non-null |
+| `isFetchingNextPage` | `boolean` | Loading state for next page |
+| `isFetchingPreviousPage` | `boolean` | Loading state for previous page |
+| `refetch` | `() => void` | Re-fetches first page only |
+
+Infinite queries also support `prefetch`, `invalidate`, `invalidateAll`, `setQueryData`, and `getQueryData`.
+
+---
 
 ### Persist
 
-Save and restore state to storage automatically.
+Save and restore state to storage automatically. Persists after every state change and hydrates on initialization.
 
 ```ts
 const useSettings = create({
@@ -410,53 +510,58 @@ const useSettings = create({
   actions: {
     setTheme(state, theme: 'light' | 'dark') { state.theme = theme; },
     setFontSize(state, size: number) { state.fontSize = size; },
-    toggleSidebar(state) { state.sidebarOpen = !state.sidebarOpen; },
   },
   persist: {
-    name: 'app-settings',  // localStorage key (required)
+    name: 'app-settings',
   },
 });
 ```
 
-Persist options:
+**Persist config:**
 
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `name` | `string` | — | Storage key (required) |
-| `storage` | `StateStorage` | `localStorage` | Custom storage engine |
-| `partialize` | `(state) => Partial<S>` | identity | Pick which keys to persist |
-| `version` | `number` | `0` | Version number for migrations |
-| `migrate` | `(persisted, version) => S` | — | Migration function on version mismatch |
-| `merge` | `(persisted, current) => S` | shallow merge | Custom merge strategy |
-| `onRehydrationFinished` | `(state) => void` | — | Callback after hydration |
+| `storage` | `StateStorage` | `localStorage` | Custom storage (`getItem`, `setItem`, `removeItem`) |
+| `partialize` | `(state) => Partial<S>` | identity | Select which keys to persist |
+| `version` | `number` | `0` | Schema version for migrations |
+| `migrate` | `(persisted, version) => S` | — | Migration function when version differs |
+| `merge` | `(persisted, current) => S` | shallow merge | Custom merge strategy on hydration |
+| `onRehydrationFinished` | `(state) => void` | — | Callback after hydration completes |
+
+**Advanced example:**
 
 ```ts
 const useStore = create({
-  state: { count: 0, secret: 'hidden' },
+  state: { items: [] as Todo[], filter: 'all', secret: 'hidden' },
   persist: {
-    name: 'my-store',
-    partialize: (state) => ({ count: state.count }), // only persist count
+    name: 'todo-store',
+    partialize: (state) => ({ items: state.items, filter: state.filter }), // skip secret
     version: 2,
     migrate: (persisted, version) => {
-      if (version < 2) return { ...persisted, newField: 'default' };
+      if (version < 2) return { ...persisted, filter: persisted.filter ?? 'all' };
       return persisted;
     },
-    storage: sessionStorage, // use sessionStorage instead
+    storage: sessionStorage,
   },
 });
 ```
 
+SSR-safe — uses a no-op storage when `window` is undefined.
+
+---
+
 ### Subscribe with Selector
 
-Enhanced `subscribe` — listen to specific state slices instead of every change.
+The `subscribe` method supports both simple listeners and selector-based subscriptions.
 
 ```ts
-// Original: fires on every state change
-useStore.subscribe(() => {
-  console.log('Something changed');
+// Simple — fires on every state change
+const unsub = useStore.subscribe(() => {
+  console.log('State changed:', useStore.getState());
 });
 
-// With selector: fires only when count changes
+// Selector — fires only when the selected value changes
 useStore.subscribe(
   (state) => state.count,
   (current, previous) => {
@@ -464,20 +569,24 @@ useStore.subscribe(
   },
 );
 
-// With custom equality function
+// Custom equality — useful for object/array selectors
 useStore.subscribe(
   (state) => ({ a: state.a, b: state.b }),
-  (current, previous) => { /* only fires when a or b change */ },
+  (current, previous) => { /* fires when a or b changes */ },
   { equalityFn: (a, b) => a.a === b.a && a.b === b.b },
 );
 
 // Fire immediately with current value
 useStore.subscribe(
   (state) => state.count,
-  (current) => { console.log('Current count:', current); },
+  (current) => { console.log('Current:', current); },
   { fireImmediately: true },
 );
 ```
+
+All variants return an `unsubscribe` function.
+
+---
 
 ### Using Outside React
 
@@ -485,31 +594,33 @@ useStore.subscribe(
 // Read state (includes computed)
 const { items, activeCount } = useTodos.getState();
 
-// Update state
+// Update state — Immer draft, partial object, or full replacement
 useTodos.setState((s) => { s.loading = true; });
-useTodos.setState({ loading: false });  // partial update
+useTodos.setState({ loading: false });
 
-// Subscribe to changes
+// Subscribe
 const unsub = useTodos.subscribe(() => {
-  console.log('State changed:', useTodos.getState());
+  console.log(useTodos.getState());
 });
 unsub();
+
+// Call actions/effects directly
+useTodos.actions.add('New item');
+useTodos.effects.fetchTodos();
 ```
+
+---
 
 ### Multiple Stores
 
-Create as many stores as you need. Each is independent.
+Create as many independent stores as you need.
 
 ```ts
 const useAuth = create({
   state: { user: null as User | null, token: '' },
   effects: {
     async login({ set }, email: string, password: string) {
-      const res = await fetch('/api/login', {
-        method: 'POST',
-        body: JSON.stringify({ email, password }),
-      });
-      const { user, token } = await res.json();
+      const { user, token } = await api.login(email, password);
       set((s) => { s.user = user; s.token = token; });
     },
   },
@@ -520,6 +631,7 @@ const useCart = create({
   state: { items: [] as CartItem[] },
   actions: {
     addItem(state, item: CartItem) { state.items.push(item); },
+    clear(state) { state.items = []; },
   },
   computed: {
     total: (state) => state.items.reduce((sum, i) => sum + i.price, 0),
@@ -528,45 +640,36 @@ const useCart = create({
 });
 ```
 
-## TypeScript
+---
 
-Type inference works automatically for simple state:
+## Standalone Hooks
 
-```ts
-const useCounter = create({
-  state: { count: 0 },
-  actions: {
-    increment(state) { state.count += 1; },
-    addBy(state, n: number) { state.count += n; },
-  },
-  computed: {
-    doubled: (state) => state.count * 2,
-  },
-});
-
-const count = useCounter((s) => s.count);    // number
-const doubled = useCounter((s) => s.doubled); // number
-```
-
-For complex state with arrays/objects, annotate the `state` param with `Draft<YourState>`:
+For advanced use cases, you can create query/mutation/infinite-query hooks independently:
 
 ```ts
-import type { Draft } from 'immer';
+import { createQueryHook, createMutationHook, createInfiniteQueryHook } from 'zustand-immer-lite';
 
-interface TodoState {
-  items: Todo[];
-  loading: boolean;
-}
+const useUsers = createQueryHook({
+  fn: async () => fetch('/api/users').then(r => r.json()),
+  staleTime: 30_000,
+});
 
-const useTodos = create({
-  state: { items: [] as Todo[], loading: false },
-  actions: {
-    add(state: Draft<TodoState>, text: string) {
-      state.items.push({ id: Date.now(), text, done: false });
-    },
-  },
+const useCreateUser = createMutationHook({
+  fn: async (name: string) => fetch('/api/users', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  }).then(r => r.json()),
+  onSuccess: () => { useUsers.invalidateAll(); },
+});
+
+const useFeed = createInfiniteQueryHook({
+  fn: async (cursor?: string) => fetchFeed(cursor),
+  getNextPageParam: (page) => page.nextCursor,
+  infinite: true,
 });
 ```
+
+---
 
 ## Comparison
 
@@ -574,18 +677,45 @@ const useTodos = create({
 |---|---|---|---|---|
 | Bundle size | ~3KB | ~40KB | ~2KB | ~40KB |
 | Provider required | No | Yes | No | Yes |
-| Immer built-in | Yes | Yes | No | - |
-| Async support | Built-in effects | createAsyncThunk | Manual | Built-in |
-| Computed state | Built-in (dep tracking) | Manual selectors | Manual | - |
-| Query caching | Built-in (LRU) | - | - | Built-in |
-| Infinite queries | Built-in | - | - | Built-in |
+| Immer built-in | Yes | Yes | No | — |
+| Computed (dep tracking) | Yes | No | No | — |
+| Async effects | Built-in | createAsyncThunk | Manual | — |
+| Query caching (LRU) | Built-in | — | — | Built-in |
+| Infinite queries | Built-in | — | — | Built-in |
 | Mutations | Built-in | Manual | Manual | Built-in |
 | Optimistic updates | Built-in | Manual | Manual | Built-in |
-| Prefetching | Built-in | - | - | Built-in |
-| Persist | Built-in | Manual | Middleware | - |
-| Subscribe selector | Built-in | - | Middleware | - |
-| Race condition handling | Yes | - | - | Yes |
-| Boilerplate | Minimal | Medium | Minimal | Minimal |
+| Prefetching | Built-in | — | — | Built-in |
+| Persist | Built-in | Manual | Middleware | — |
+| Subscribe w/ selector | Built-in | — | Middleware | — |
+| Race condition handling | Yes | — | — | Yes |
+| Request deduplication | Yes | — | — | Yes |
+
+---
+
+## Exports
+
+```ts
+// Core
+export { create } from 'zustand-immer-lite';
+
+// Standalone hook factories
+export { createQueryHook } from 'zustand-immer-lite';
+export { createMutationHook } from 'zustand-immer-lite';
+export { createInfiniteQueryHook } from 'zustand-immer-lite';
+
+// No-op identity (Immer is already built-in)
+export { immer } from 'zustand-immer-lite';
+
+// Types
+export type {
+  SetState, EffectHelpers, UseStore,
+  QueryConfig, QueryResult, QueryHookMethods, QueryHook,
+  MutationConfig, MutationResult, InferMutations,
+  InfiniteData, InfiniteQueryConfig, InfiniteQueryResult,
+  InfiniteQueryHookMethods, InfiniteQueryHook,
+  StateStorage, PersistConfig, SubscribeWithSelector,
+} from 'zustand-immer-lite';
+```
 
 ## License
 

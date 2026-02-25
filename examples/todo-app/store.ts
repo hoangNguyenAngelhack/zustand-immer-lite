@@ -24,9 +24,6 @@ export const useTodos = create({
     filter: 'all' as 'all' | 'active' | 'completed',
   },
   actions: {
-    add(state: Draft<TodoState>, text: string) {
-      state.items.push({ id: nextId++, text, completed: false });
-    },
     toggle(state: Draft<TodoState>, id: number) {
       const todo = state.items.find((t) => t.id === id);
       if (todo) todo.completed = !todo.completed;
@@ -56,7 +53,7 @@ export const useTodos = create({
       try {
         await new Promise((r) => setTimeout(r, 500));
         const data: Todo[] = [
-          { id: 1, text: 'Learn redux-simple', completed: true },
+          { id: 1, text: 'Learn zustand-immer-lite', completed: true },
           { id: 2, text: 'Build an app', completed: false },
           { id: 3, text: 'Ship it!', completed: false },
         ];
@@ -69,12 +66,10 @@ export const useTodos = create({
   mutations: {
     saveTodo: {
       fn: async (text: string) => {
-        // Simulate API call
         await new Promise((r) => setTimeout(r, 300));
         return { id: nextId++, text, completed: false } as Todo;
       },
       onSuccess: (todo: Todo) => {
-        // Add the saved todo to local state
         useTodos.setState((s) => { s.items.push(todo); });
       },
     },
@@ -85,10 +80,10 @@ export const useTodos = create({
   },
 });
 
-// Log filter changes via subscribeWithSelector
+// Subscribe with selector — log filter changes
 useTodos.subscribe(
   (state) => state.filter,
   (current, previous) => {
-    console.log(`filter changed: ${previous} -> ${current}`);
+    console.log(`[todos] filter: ${previous} → ${current}`);
   },
 );

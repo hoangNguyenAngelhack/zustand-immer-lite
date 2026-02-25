@@ -17,7 +17,8 @@ export interface FeedPage {
   nextCursor: string | null;
 }
 
-// Fake API data
+// --- Fake API data ---
+
 const fakeUsers: User[] = [
   { id: 1, name: 'Alice', email: 'alice@example.com' },
   { id: 2, name: 'Bob', email: 'bob@example.com' },
@@ -33,6 +34,8 @@ const fakePosts: Post[] = [
   { id: 6, userId: 2, title: 'Optimistic updates guide' },
 ];
 
+// --- Store ---
+
 export const useApp = create({
   state: { selectedUserId: null as number | null },
   actions: {
@@ -42,7 +45,7 @@ export const useApp = create({
     hasSelection: (state) => state.selectedUserId !== null,
   },
   queries: {
-    // Regular query with prefetch support
+    // Basic query with prefetch
     allUsers: {
       fn: async () => {
         await new Promise((r) => setTimeout(r, 800));
@@ -60,6 +63,7 @@ export const useApp = create({
       },
       staleTime: 10_000,
     },
+    // Per-args query with LRU cache limit
     postsByUser: {
       fn: async (userId: number) => {
         await new Promise((r) => setTimeout(r, 400));
@@ -68,7 +72,7 @@ export const useApp = create({
       staleTime: 15_000,
       maxCacheSize: 10,
     },
-    // Infinite query — paginated feed
+    // Infinite query — cursor-based pagination
     feed: {
       fn: async (cursor?: string) => {
         await new Promise((r) => setTimeout(r, 600));
@@ -87,21 +91,19 @@ export const useApp = create({
     },
   },
   mutations: {
-    // Mutation to rename a user
     renameUser: {
       fn: async (id: number, newName: string) => {
         await new Promise((r) => setTimeout(r, 300));
         const user = fakeUsers.find((u) => u.id === id);
-        if (user) user.name = newName; // mutate fake data
+        if (user) user.name = newName;
         return { id, name: newName };
       },
       onSuccess: () => {
-        // Invalidate queries so they refetch with new data
-        (useApp.queries.allUsers as any).invalidateAll();
+        useApp.queries.allUsers.invalidateAll();
       },
     },
   },
 });
 
-// Prefetch users on module load — data is ready before components mount
-(useApp.queries.allUsers as any).prefetch();
+// Prefetch users on module load
+useApp.queries.allUsers.prefetch();

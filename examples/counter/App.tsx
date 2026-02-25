@@ -10,6 +10,9 @@ export default function Counter() {
   return (
     <div>
       <h2>Counter</h2>
+      <p style={{ fontSize: '0.85rem', color: '#888' }}>
+        Demonstrates: actions, computed (with chaining), persist, subscribe with selector
+      </p>
       <div style={{ fontSize: '2rem', margin: '0.5rem 0' }}>
         {count}
         <span style={{ fontSize: '0.9rem', color: '#888', marginLeft: 8 }}>

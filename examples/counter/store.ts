@@ -14,11 +14,11 @@ export const useCounter = create({
     isNegative: (state) => state.count < 0,
     label: (state) => {
       if (state.count === 0) return 'zero';
-      return state.isPositive ? 'positive' : 'negative'; // chaining computed
+      return state.isPositive ? 'positive' : 'negative';
     },
   },
   persist: {
-    name: 'counter-store', // auto-saved to localStorage
+    name: 'counter-store',
   },
 });
 
@@ -26,6 +26,6 @@ export const useCounter = create({
 useCounter.subscribe(
   (state) => state.count,
   (current, previous) => {
-    console.log(`count changed: ${previous} -> ${current}`);
+    console.log(`[counter] count: ${previous} → ${current}`);
   },
 );
